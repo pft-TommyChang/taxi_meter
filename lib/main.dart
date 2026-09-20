@@ -794,11 +794,9 @@ class FuguiMeterSkin extends MeterSkin {
                       Expanded(
                         flex: 5,
                         child: _FareReadout(
-                          // Blank before the trip starts; blank unused leading
-                          // zeros once running (the ones digit is always kept).
-                          value: reading == null
-                              ? '    '
-                              : fare.toString().padLeft(4, ' '),
+                          // Always show the fare: 0 before/after a trip, and
+                          // unused leading zeros render as faint ghost slots.
+                          value: fare.toString().padLeft(4, ' '),
                         ),
                       ),
                     ],
@@ -1217,6 +1215,8 @@ class _SevenSegmentPainter extends CustomPainter {
   final String value;
   final double brightness;
 
+  // Segment indices: 0=top, 1=top-right, 2=bottom-right, 3=bottom,
+  // 4=bottom-left, 5=top-left, 6=middle.
   static const segments = <String, Set<int>>{
     '0': {0, 1, 2, 3, 4, 5},
     '1': {1, 2},
@@ -1231,71 +1231,120 @@ class _SevenSegmentPainter extends CustomPainter {
     '-': {6},
   };
 
+  // Digit geometry inside a [cell] x 100 box. Horizontal bars span [x0, x0 + w]
+  // and vertical bars sit at x0 + t/2 and x0 + w - t/2, all sharing the same
+  // y0 / h / t, so every corner lines up and the 45-degree notches between
+  // neighbouring segments stay perfectly even.
+  static const double cell = 60;
+  static const double x0 = 8;
+  static const double w = 44;
+  static const double y0 = 5;
+  static const double h = 90;
+  static const double t = 11; // segment thickness
+  static const double gap = 2.4; // notch between neighbouring segments
+
+  static const Color _onColor = Color(0xffff2a1d);
+  static const Color _glowColor = Color(0xffff5a48);
+  static const Color _offColor = Color(0xffff6a58);
+
   @override
   void paint(Canvas canvas, Size size) {
     var x = 0.0;
     for (final char in value.split('')) {
       if (char == ':' || char == '.') {
-        final paint = Paint()
-          ..color = const Color(0xffff2c20).withValues(alpha: brightness);
-        if (char == ':') {
-          canvas.drawCircle(Offset(x + 10, 35), 5, paint);
-          canvas.drawCircle(Offset(x + 10, 72), 5, paint);
-        } else {
-          canvas.drawCircle(Offset(x + 8, 90), 6, paint);
-        }
+        _drawPunctuation(canvas, x, char);
         x += 23;
         continue;
       }
-      for (final segment in segments[char] ?? const <int>{}) {
-        final path = _path(x, segment);
-        canvas.drawPath(
-          path,
-          Paint()
-            ..color = const Color(
-              0xffff3a2d,
-            ).withValues(alpha: .45 * brightness)
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
-        );
-        canvas.drawPath(
-          path,
-          Paint()
-            ..color = const Color(0xffff281d).withValues(alpha: brightness),
-        );
+      // Every slot shows all seven segments: lit ones bright, the rest as a
+      // faint ghost -- including blank/space slots, which become a full ghost 8.
+      final active = segments[char] ?? const <int>{};
+      for (var seg = 0; seg < 7; seg++) {
+        _drawSegment(canvas, x, seg, active.contains(seg));
       }
-      x += 60;
+      x += cell;
     }
   }
 
-  Path _path(double x, int segment) {
-    Path horizontal(double y) => Path()
-      ..moveTo(x + 8, y)
-      ..lineTo(x + 44, y)
-      ..lineTo(x + 51, y + 5.5)
-      ..lineTo(x + 44, y + 11)
-      ..lineTo(x + 8, y + 11)
-      ..lineTo(x + 1, y + 5.5)
-      ..close();
-    Path vertical(double y, bool right) {
-      final left = x + (right ? 43 : 1);
-      return Path()
-        ..moveTo(left + 6, y + 3)
-        ..lineTo(left + 12, y + 10)
-        ..lineTo(left + 12, y + 39)
-        ..lineTo(left + 6, y + 45)
-        ..lineTo(left, y + 39)
-        ..lineTo(left, y + 10)
-        ..close();
+  void _drawSegment(Canvas canvas, double x, int seg, bool on) {
+    final path = _path(x, seg);
+    if (on) {
+      // Soft bloom underneath, then the crisp lit segment on top.
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = _glowColor.withValues(alpha: .5 * brightness)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+      canvas.drawPath(
+        path,
+        Paint()..color = _onColor.withValues(alpha: brightness),
+      );
+    } else {
+      // Unlit segment: a faint ghost so the full digit outline is always
+      // visible, like a real red LED module under light.
+      canvas.drawPath(
+        path,
+        Paint()..color = _offColor.withValues(alpha: .11 * brightness),
+      );
     }
+  }
 
-    return switch (segment) {
-      0 => horizontal(0),
-      1 => vertical(7, true),
-      2 => vertical(51, true),
-      3 => horizontal(89),
-      4 => vertical(51, false),
-      5 => vertical(7, false),
-      _ => horizontal(44),
+  void _drawPunctuation(Canvas canvas, double x, String char) {
+    final cx = x + 11.5;
+    final centres = char == ':' ? const [37.0, 63.0] : const [90.0];
+    const r = 5.5;
+    for (final cy in centres) {
+      canvas.drawCircle(
+        Offset(cx, cy),
+        r,
+        Paint()
+          ..color = _glowColor.withValues(alpha: .5 * brightness)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+      canvas.drawCircle(
+        Offset(cx, cy),
+        r,
+        Paint()..color = _onColor.withValues(alpha: brightness),
+      );
+    }
+  }
+
+  Path _path(double x, int seg) {
+    final left = x + x0;
+    final right = left + w;
+    final midY = y0 + h / 2;
+    final lx = left + t / 2; // centre of the left vertical column
+    final rx = right - t / 2; // centre of the right vertical column
+
+    // Elongated hexagon for a horizontal bar centred on [cy].
+    Path horizontal(double cy) => Path()
+      ..moveTo(left + gap, cy)
+      ..lineTo(left + gap + t / 2, cy - t / 2)
+      ..lineTo(right - gap - t / 2, cy - t / 2)
+      ..lineTo(right - gap, cy)
+      ..lineTo(right - gap - t / 2, cy + t / 2)
+      ..lineTo(left + gap + t / 2, cy + t / 2)
+      ..close();
+
+    // Elongated hexagon for a vertical bar centred on [cx], from ya to yb.
+    Path vertical(double cx, double ya, double yb) => Path()
+      ..moveTo(cx, ya + gap)
+      ..lineTo(cx + t / 2, ya + gap + t / 2)
+      ..lineTo(cx + t / 2, yb - gap - t / 2)
+      ..lineTo(cx, yb - gap)
+      ..lineTo(cx - t / 2, yb - gap - t / 2)
+      ..lineTo(cx - t / 2, ya + gap + t / 2)
+      ..close();
+
+    return switch (seg) {
+      0 => horizontal(y0 + t / 2), // top
+      1 => vertical(rx, y0, midY), // top-right
+      2 => vertical(rx, midY, y0 + h), // bottom-right
+      3 => horizontal(y0 + h - t / 2), // bottom
+      4 => vertical(lx, midY, y0 + h), // bottom-left
+      5 => vertical(lx, y0, midY), // top-left
+      _ => horizontal(midY), // middle
     };
   }
 
