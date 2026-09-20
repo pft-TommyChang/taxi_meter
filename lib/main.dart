@@ -1241,7 +1241,7 @@ class _SevenSegmentPainter extends CustomPainter {
   static const double y0 = 5;
   static const double h = 90;
   static const double t = 11; // segment thickness
-  static const double gap = 2.4; // notch between neighbouring segments
+  static const double gap = 2.6; // notch between neighbouring segments
 
   static const Color _onColor = Color(0xffff2a1d);
   static const Color _glowColor = Color(0xffff5a48);
@@ -1317,33 +1317,43 @@ class _SevenSegmentPainter extends CustomPainter {
     final lx = left + t / 2; // centre of the left vertical column
     final rx = right - t / 2; // centre of the right vertical column
 
-    // Elongated hexagon for a horizontal bar centred on [cy].
+    // Horizontal bar centred on [cy]. Its solid body only starts a full
+    // thickness (plus gap) in from each end, so it clears the vertical columns
+    // and the pointed tips leave a clean diagonal notch at every corner.
     Path horizontal(double cy) => Path()
-      ..moveTo(left + gap, cy)
-      ..lineTo(left + gap + t / 2, cy - t / 2)
-      ..lineTo(right - gap - t / 2, cy - t / 2)
-      ..lineTo(right - gap, cy)
-      ..lineTo(right - gap - t / 2, cy + t / 2)
-      ..lineTo(left + gap + t / 2, cy + t / 2)
+      ..moveTo(left + t / 2 + gap, cy)
+      ..lineTo(left + t + gap, cy - t / 2)
+      ..lineTo(right - t - gap, cy - t / 2)
+      ..lineTo(right - t / 2 - gap, cy)
+      ..lineTo(right - t - gap, cy + t / 2)
+      ..lineTo(left + t + gap, cy + t / 2)
       ..close();
 
-    // Elongated hexagon for a vertical bar centred on [cx], from ya to yb.
-    Path vertical(double cx, double ya, double yb) => Path()
-      ..moveTo(cx, ya + gap)
-      ..lineTo(cx + t / 2, ya + gap + t / 2)
-      ..lineTo(cx + t / 2, yb - gap - t / 2)
-      ..lineTo(cx, yb - gap)
-      ..lineTo(cx - t / 2, yb - gap - t / 2)
-      ..lineTo(cx - t / 2, ya + gap + t / 2)
-      ..close();
+    // The end that meets a top/bottom bar needs a full clearance; the end that
+    // meets the middle bar is kept tight so the two half-columns nearly touch
+    // across the centre instead of leaving a big gap.
+    final outer = t / 2 + gap;
+    final inner = gap;
+
+    // Vertical bar centred on [cx] from [top] to [bot]; [ti]/[bi] are the tip
+    // insets at the top and bottom ends.
+    Path vertical(double cx, double top, double bot, double ti, double bi) =>
+        Path()
+          ..moveTo(cx, top + ti)
+          ..lineTo(cx + t / 2, top + ti + t / 2)
+          ..lineTo(cx + t / 2, bot - bi - t / 2)
+          ..lineTo(cx, bot - bi)
+          ..lineTo(cx - t / 2, bot - bi - t / 2)
+          ..lineTo(cx - t / 2, top + ti + t / 2)
+          ..close();
 
     return switch (seg) {
       0 => horizontal(y0 + t / 2), // top
-      1 => vertical(rx, y0, midY), // top-right
-      2 => vertical(rx, midY, y0 + h), // bottom-right
+      1 => vertical(rx, y0, midY, outer, inner), // top-right
+      2 => vertical(rx, midY, y0 + h, inner, outer), // bottom-right
       3 => horizontal(y0 + h - t / 2), // bottom
-      4 => vertical(lx, midY, y0 + h), // bottom-left
-      5 => vertical(lx, y0, midY), // top-left
+      4 => vertical(lx, midY, y0 + h, inner, outer), // bottom-left
+      5 => vertical(lx, y0, midY, outer, inner), // top-left
       _ => horizontal(midY), // middle
     };
   }
