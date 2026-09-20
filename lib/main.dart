@@ -41,6 +41,8 @@ class TaxiMeterPage extends StatefulWidget {
 
 enum _TripSource { gps, simulation }
 
+enum _LocationBlock { serviceDisabled, permissionDenied }
+
 class _TaxiMeterPageState extends State<TaxiMeterPage> {
   final TaxiMeterController _meter = TaxiMeterController();
   final MeterSkin _skin = const FuguiMeterSkin();
@@ -61,7 +63,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
   Future<void> _startTrip() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      await _offerSimulation();
+      await _offerSimulation(_LocationBlock.serviceDisabled);
       return;
     }
     var permission = await Geolocator.checkPermission();
@@ -70,7 +72,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
     }
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      await _offerSimulation();
+      await _offerSimulation(_LocationBlock.permissionDenied);
       return;
     }
 
@@ -92,9 +94,11 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
           locationSettings: AppleSettings(
             accuracy: LocationAccuracy.bestForNavigation,
             distanceFilter: 1,
+            // Foreground-only: the meter runs while the app is open, so we do
+            // not request background location updates.
             pauseLocationUpdatesAutomatically: false,
-            showBackgroundLocationIndicator: true,
-            allowBackgroundLocationUpdates: true,
+            showBackgroundLocationIndicator: false,
+            allowBackgroundLocationUpdates: false,
           ),
         ).listen(
           _onPosition,
@@ -104,28 +108,44 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
         );
   }
 
-  Future<void> _offerSimulation() async {
+  // Pressing 計程計時 asks for GPS first; when the device has no usable GPS we
+  // let the driver either open the relevant settings or fall back to demo mode.
+  Future<void> _offerSimulation(_LocationBlock reason) async {
     if (!mounted) return;
-    final shouldSimulate = await showDialog<bool>(
+    final message = reason == _LocationBlock.serviceDisabled
+        ? '裝置的定位服務尚未開啟，無法使用 GPS 跳表。請開啟定位服務後再按一次「計程計時」，或先以模擬模式跳表。'
+        : 'App 尚未取得定位權限，無法使用 GPS 跳表。請到設定開啟定位權限後再按一次「計程計時」，或先以模擬模式跳表。';
+    final choice = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('以模擬模式開始？'),
-        content: const Text(
-          '目前沒有可用的 GPS。模擬模式可照常跳表：點「行駛公里」會以時速 80 公里前進；點「計程時間」會停止前進並累計延滯時間。',
-        ),
+        title: const Text('需要 GPS 權限'),
+        content: Text(message),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(dialogContext, 'cancel'),
             child: const Text('取消'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'settings'),
+            child: const Text('前往設定'),
+          ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('模擬開始'),
+            onPressed: () => Navigator.pop(dialogContext, 'demo'),
+            child: const Text('模擬模式'),
           ),
         ],
       ),
     );
-    if (shouldSimulate == true) _startSimulation();
+    switch (choice) {
+      case 'settings':
+        if (reason == _LocationBlock.serviceDisabled) {
+          await Geolocator.openLocationSettings();
+        } else {
+          await Geolocator.openAppSettings();
+        }
+      case 'demo':
+        _startSimulation();
+    }
   }
 
   void _startSimulation() {
@@ -718,7 +738,7 @@ class FuguiMeterSkin extends MeterSkin {
             child: Divider(height: 2, color: Color(0xff6a6d75)),
           ),
           Expanded(
-            flex: 7,
+            flex: 8,
             child: Row(
               children: [
                 const Expanded(flex: 18, child: _FuguiBrand()),
@@ -795,14 +815,14 @@ class FuguiMeterSkin extends MeterSkin {
             flex: 3,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final keyLabelSize = constraints.maxWidth * .045;
+                final keyLabelSize = constraints.maxWidth * .040;
                 return Row(
                   children: [
                     _LargeKey(
                       // This is a physical key cap, so its legend never changes
                       // with the meter state. The display above communicates state.
                       label: '空',
-                      flex: 12,
+                      flex: 10,
                       labelSize: keyLabelSize,
                       // 空 is the on-duty state: selected (and therefore locked)
                       // while idle or metering; only pressable once stopped, to
@@ -810,38 +830,40 @@ class FuguiMeterSkin extends MeterSkin {
                       active: !isPaused,
                       onTap: isPaused ? onReset : null,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     _LargeKey(
                       label: '計程計時',
-                      flex: 19,
+                      flex: 24,
                       labelSize: keyLabelSize,
                       // A momentary action (start when idle, resume when
                       // stopped); it is never a lit/selected state itself.
+                      // Starting asks for GPS first, then falls back to a demo
+                      // prompt when GPS is unavailable.
                       active: false,
                       onTap: isPaused
                           ? onResume
-                          : (isRunning ? null : onSimulationStart),
+                          : (isRunning ? null : onStart),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     _LargeKey(
                       label: '停',
-                      flex: 11,
+                      flex: 10,
                       labelSize: keyLabelSize,
                       active: isPaused,
                       onTap: isRunning && !isPaused ? onStop : null,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     _LargeKey(
                       label: '夜間加成',
-                      flex: 21,
+                      flex: 24,
                       labelSize: keyLabelSize,
                       active: nightSurchargeActive,
                       onTap: isRunning ? onNightSurcharge : null,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     _LargeKey(
                       label: '設定',
-                      flex: 12,
+                      flex: 15,
                       labelSize: keyLabelSize,
                       onTap: onSettings,
                     ),
@@ -1125,31 +1147,42 @@ class _FareReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          flex: 3,
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: const Text(
+    // Right-align the whole row and reserve exactly four LED slots for the
+    // price, so it no longer stretches into a wide, mostly-empty panel.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final h = constraints.maxHeight;
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
               '車資',
               style: TextStyle(
-                color: Color(0xffb6a279),
+                color: const Color(0xffb6a279),
                 fontWeight: FontWeight.w900,
                 letterSpacing: 1,
-                fontSize: 100,
+                fontSize: h * 0.42,
               ),
             ),
-          ),
-        ),
-        const SizedBox(width: 20),
-        Expanded(
-          flex: 6,
-          child: _LedReadout(label: '', unit: '', value: value, main: true),
-        ),
-        const SizedBox(width: 20),
-        const Expanded(flex: 1, child: _OutsideUnit('元')),
-      ],
+            SizedBox(width: h * 0.14),
+            SizedBox(
+              height: h,
+              width: h * 2.3,
+              child: _LedReadout(label: '', unit: '', value: value, main: true),
+            ),
+            SizedBox(width: h * 0.12),
+            Text(
+              '元',
+              style: TextStyle(
+                color: const Color(0xffd2b16d),
+                fontWeight: FontWeight.w900,
+                fontSize: h * 0.36,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

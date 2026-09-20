@@ -26,14 +26,8 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>此 App 需要持續取得精確位置，即使切到背景也能持續模擬計程車跳表並計算行駛距離。</string>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>此 App 需要持續取得精確位置，即使切到背景也能持續模擬計程車跳表並計算行駛距離。</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>location</string>
-	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>此 App 需要在使用期間取得精確位置，以計算行駛距離並模擬計程車跳表。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
