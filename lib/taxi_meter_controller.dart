@@ -25,6 +25,7 @@ class TaipeiFareRules {
     required double distanceMeters,
     required Duration waitingTime,
     required DateTime startedAt,
+    bool nightSurchargeApplied = false,
   }) {
     final distanceSteps =
         ((distanceMeters - baseDistanceMeters).clamp(0.0, double.infinity) /
@@ -32,7 +33,9 @@ class TaipeiFareRules {
             .floor();
     final waitingSteps = waitingTime.inSeconds ~/ waitingStepSeconds;
     return baseFare +
-        (isNightStart(startedAt) ? nightSurcharge : 0) +
+        (nightSurchargeApplied || isNightStart(startedAt)
+            ? nightSurcharge
+            : 0) +
         (distanceSteps + waitingSteps) * stepFare;
   }
 }
@@ -40,6 +43,7 @@ class TaipeiFareRules {
 class TripReading {
   const TripReading({
     required this.startedAt,
+    required this.elapsed,
     required this.distanceMeters,
     required this.billableDistanceMeters,
     required this.waitingTime,
@@ -49,6 +53,7 @@ class TripReading {
   });
 
   final DateTime startedAt;
+  final Duration elapsed;
 
   /// All valid movement, shown to the rider as trip distance.
   final double distanceMeters;
@@ -77,14 +82,22 @@ class TaxiMeterController {
   Duration _waitingTime = Duration.zero;
   double _speedMetersPerSecond = 0;
   double? _accuracyMeters;
+  DateTime? _pausedAt;
+  Duration _pausedDuration = Duration.zero;
+  bool _manualNightSurcharge = false;
 
   bool get isRunning => _startedAt != null;
+  bool get nightSurchargeActive =>
+      _manualNightSurcharge ||
+      (_startedAt != null && rules.isNightStart(_startedAt!));
 
   TripReading? get reading {
     final start = _startedAt;
     if (start == null) return null;
     return TripReading(
       startedAt: start,
+      elapsed:
+          (_pausedAt ?? DateTime.now()).difference(start) - _pausedDuration,
       distanceMeters: _distanceMeters,
       billableDistanceMeters: _billableDistanceMeters,
       waitingTime: _waitingTime,
@@ -92,6 +105,7 @@ class TaxiMeterController {
         distanceMeters: _billableDistanceMeters,
         waitingTime: _waitingTime,
         startedAt: start,
+        nightSurchargeApplied: _manualNightSurcharge,
       ),
       accuracyMeters: _accuracyMeters,
       speedMetersPerSecond: _speedMetersPerSecond,
@@ -109,9 +123,40 @@ class TaxiMeterController {
     _waitingTime = Duration.zero;
     _speedMetersPerSecond = 0;
     _accuracyMeters = null;
+    _pausedAt = null;
+    _pausedDuration = Duration.zero;
+    _manualNightSurcharge = false;
   }
 
-  void stop(DateTime now) => tick(now);
+  void pause(DateTime now) {
+    if (!isRunning || _pausedAt != null) return;
+    tick(now);
+    _pausedAt = now;
+  }
+
+  /// Restarts accounting after a UI-level pause without charging the paused
+  /// interval or connecting a GPS segment across that interval.
+  void resume(DateTime now) {
+    if (!isRunning) return;
+    final pausedAt = _pausedAt;
+    if (pausedAt != null && now.isAfter(pausedAt)) {
+      _pausedDuration += now.difference(pausedAt);
+    }
+    _pausedAt = null;
+    _lastAccountedAt = now;
+    _lastSampleAt = null;
+    _lastLatitude = null;
+    _lastLongitude = null;
+    _speedMetersPerSecond = 0;
+  }
+
+  /// The physical 夜間加成 key manually applies the one-time night surcharge.
+  /// A trip that starts during the regulated night period stays surcharged even
+  /// when this manual setting is turned off.
+  void setNightSurcharge(bool enabled) {
+    if (!isRunning) return;
+    _manualNightSurcharge = enabled;
+  }
 
   /// Advances a deliberate simulation without requiring a GPS reading.
   /// Moving is billed by distance; idle time follows Taipei's delayed-time rule.
@@ -147,6 +192,9 @@ class TaxiMeterController {
     _billableDistanceMeters = 0;
     _waitingTime = Duration.zero;
     _accuracyMeters = null;
+    _pausedAt = null;
+    _pausedDuration = Duration.zero;
+    _manualNightSurcharge = false;
   }
 
   /// Allows waiting time to advance between GPS callbacks when the most recent

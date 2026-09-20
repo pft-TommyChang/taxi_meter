@@ -49,6 +49,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
   String _locationStatus = '尚未開始定位';
   _TripSource? _tripSource;
   bool _simulationMoving = false;
+  bool _isPaused = false;
 
   @override
   void dispose() {
@@ -77,9 +78,15 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
     setState(() {
       _meter.start(now);
       _tripSource = _TripSource.gps;
+      _isPaused = false;
       _locationStatus = '正在取得高精度 GPS…';
     });
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    _subscribeToGps();
+  }
+
+  void _subscribeToGps() {
+    _positionSubscription?.cancel();
     _positionSubscription =
         Geolocator.getPositionStream(
           locationSettings: AppleSettings(
@@ -127,6 +134,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
       _meter.start(now);
       _tripSource = _TripSource.simulation;
       _simulationMoving = false;
+      _isPaused = false;
       _locationStatus = '模擬模式 · 停車計時';
     });
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
@@ -153,7 +161,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
   }
 
   void _tick() {
-    if (!_meter.isRunning) return;
+    if (!_meter.isRunning || _isPaused) return;
     final before = _meter.reading?.fare ?? 0;
     if (_tripSource == _TripSource.simulation) {
       _meter.advanceSimulation(now: DateTime.now(), moving: _simulationMoving);
@@ -170,36 +178,58 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
     SystemSound.play(SystemSoundType.click);
   }
 
-  void _stopTrip() {
+  void _pauseTrip() {
+    if (!_meter.isRunning || _isPaused) return;
     final now = DateTime.now();
     if (_tripSource == _TripSource.simulation) {
       _meter.advanceSimulation(now: now, moving: _simulationMoving);
-    } else {
-      _meter.stop(now);
     }
+    _meter.pause(now);
     _positionSubscription?.cancel();
     _positionSubscription = null;
     _ticker?.cancel();
     _ticker = null;
     setState(() {
-      _tripSource = null;
-      _simulationMoving = false;
-      _locationStatus = '本趟已結束';
+      _isPaused = true;
+      _locationStatus = '本趟暫停';
+    });
+  }
+
+  void _resumeTrip() {
+    if (!_meter.isRunning || !_isPaused) return;
+    _meter.resume(DateTime.now());
+    if (_tripSource == _TripSource.gps) {
+      _subscribeToGps();
+    }
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    setState(() {
+      _isPaused = false;
+      _locationStatus = _tripSource == _TripSource.simulation
+          ? (_simulationMoving ? '模擬模式 · 時速 80 公里' : '模擬模式 · 停車計時')
+          : '正在取得高精度 GPS…';
     });
   }
 
   void _resetTrip() {
-    _stopTrip();
+    _positionSubscription?.cancel();
+    _positionSubscription = null;
+    _ticker?.cancel();
+    _ticker = null;
     setState(() {
       _meter.reset();
       _tripSource = null;
       _simulationMoving = false;
+      _isPaused = false;
       _locationStatus = '尚未開始定位';
     });
   }
 
   void _simulateMove() {
-    if (_tripSource != _TripSource.simulation || !_meter.isRunning) return;
+    if (_tripSource != _TripSource.simulation ||
+        !_meter.isRunning ||
+        _isPaused) {
+      return;
+    }
     setState(() {
       _simulationMoving = true;
       _locationStatus = '模擬模式 · 時速 80 公里';
@@ -207,11 +237,21 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
   }
 
   void _simulateIdle() {
-    if (_tripSource != _TripSource.simulation || !_meter.isRunning) return;
+    if (_tripSource != _TripSource.simulation ||
+        !_meter.isRunning ||
+        _isPaused) {
+      return;
+    }
     setState(() {
       _simulationMoving = false;
       _locationStatus = '模擬模式 · 停車計時';
     });
+  }
+
+  void _toggleNightSurcharge() {
+    if (!_meter.isRunning) return;
+    _meter.setNightSurcharge(!_meter.nightSurchargeActive);
+    setState(() {});
   }
 
   void _openSettings() {
@@ -255,14 +295,21 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
                 fare: reading?.fare ?? 0,
                 status: _locationStatus,
                 isRunning: _meter.isRunning,
+                isPaused: _isPaused,
+                nightSurchargeActive: _meter.nightSurchargeActive,
                 onStart: _startTrip,
                 onSimulationStart: _startSimulation,
-                onStop: _stopTrip,
+                onStop: _pauseTrip,
+                onResume: _resumeTrip,
+                onReset: _resetTrip,
+                onNightSurcharge: _toggleNightSurcharge,
                 onSettings: _openSettings,
-                onSimulationMove: _tripSource == _TripSource.simulation
+                onSimulationMove:
+                    _tripSource == _TripSource.simulation && !_isPaused
                     ? _simulateMove
                     : null,
-                onSimulationIdle: _tripSource == _TripSource.simulation
+                onSimulationIdle:
+                    _tripSource == _TripSource.simulation && !_isPaused
                     ? _simulateIdle
                     : null,
                 simulationMoving: _simulationMoving,
@@ -284,9 +331,14 @@ abstract class MeterSkin {
     required int fare,
     required String status,
     required bool isRunning,
+    required bool isPaused,
+    required bool nightSurchargeActive,
     required VoidCallback onStart,
     required VoidCallback onSimulationStart,
     required VoidCallback onStop,
+    required VoidCallback onResume,
+    required VoidCallback onReset,
+    required VoidCallback onNightSurcharge,
     required VoidCallback onSettings,
     required VoidCallback? onSimulationMove,
     required VoidCallback? onSimulationIdle,
@@ -307,18 +359,20 @@ class _LegacyFuguiMeterSkin extends MeterSkin {
     required int fare,
     required String status,
     required bool isRunning,
+    required bool isPaused,
+    required bool nightSurchargeActive,
     required VoidCallback onStart,
     required VoidCallback onSimulationStart,
     required VoidCallback onStop,
+    required VoidCallback onResume,
+    required VoidCallback onReset,
+    required VoidCallback onNightSurcharge,
     required VoidCallback onSettings,
     required VoidCallback? onSimulationMove,
     required VoidCallback? onSimulationIdle,
     required bool simulationMoving,
   }) {
-    final onReset = onSettings;
-    final elapsed = reading == null
-        ? Duration.zero
-        : DateTime.now().difference(reading.startedAt);
+    final elapsed = reading?.elapsed ?? Duration.zero;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -379,17 +433,27 @@ class _LegacyFuguiMeterSkin extends MeterSkin {
               child: Row(
                 children: [
                   _Key(
-                    label: isRunning ? '計程中' : '空車',
+                    label: '空車',
                     active: isRunning,
-                    onTap: isRunning ? null : onStart,
+                    onTap: isPaused ? onReset : (isRunning ? null : onStart),
                   ),
                   _Key(
                     label: '計程計時',
                     subtitle: status,
-                    onTap: isRunning ? onStop : onSimulationStart,
+                    onTap: isPaused
+                        ? onResume
+                        : (isRunning ? null : onSimulationStart),
                   ),
-                  _Key(label: '停', onTap: isRunning ? onStop : null),
-                  _Key(label: '夜間加成', subtitle: '23:00–06:00', onTap: null),
+                  _Key(
+                    label: '停',
+                    onTap: isRunning && !isPaused ? onStop : null,
+                  ),
+                  _Key(
+                    label: '夜間加成',
+                    subtitle: '23:00–06:00',
+                    active: nightSurchargeActive,
+                    onTap: isRunning ? onNightSurcharge : null,
+                  ),
                   _Key(label: '列印', subtitle: '重設', onTap: onReset),
                 ],
               ),
@@ -605,17 +669,20 @@ class FuguiMeterSkin extends MeterSkin {
     required int fare,
     required String status,
     required bool isRunning,
+    required bool isPaused,
+    required bool nightSurchargeActive,
     required VoidCallback onStart,
     required VoidCallback onSimulationStart,
     required VoidCallback onStop,
+    required VoidCallback onResume,
+    required VoidCallback onReset,
+    required VoidCallback onNightSurcharge,
     required VoidCallback onSettings,
     required VoidCallback? onSimulationMove,
     required VoidCallback? onSimulationIdle,
     required bool simulationMoving,
   }) {
-    final elapsed = reading == null
-        ? Duration.zero
-        : DateTime.now().difference(reading.startedAt);
+    final elapsed = reading?.elapsed ?? Duration.zero;
     final clock =
         '${(elapsed.inMinutes % 100).toString().padLeft(2, '0')}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')}';
     final distance = (reading?.distanceMeters ?? 0) / 1000;
@@ -694,6 +761,7 @@ class FuguiMeterSkin extends MeterSkin {
                                 child: _FareStatus(
                                   status: status,
                                   isRunning: isRunning,
+                                  isPaused: isPaused,
                                 ),
                               ),
                               const SizedBox(width: 9),
@@ -723,23 +791,39 @@ class FuguiMeterSkin extends MeterSkin {
               child: Row(
                 children: [
                   _LargeKey(
-                    label: isRunning ? '計程中' : '空',
+                    // This is a physical key cap, so its legend never changes
+                    // with the meter state. The display above communicates state.
+                    label: '空',
                     flex: 12,
-                    active: isRunning,
-                    onTap: isRunning ? null : onStart,
+                    // A stopped trip has both 空 and 停 selected: it is parked
+                    // and ready for the driver to clear back to empty.
+                    active: isPaused,
+                    onTap: isPaused ? onReset : (isRunning ? null : onStart),
                   ),
                   _LargeKey(
                     label: '計程計時',
                     flex: 19,
-                    active: onSimulationIdle != null && !simulationMoving,
-                    onTap: isRunning ? onStop : onSimulationStart,
+                    active:
+                        isRunning &&
+                        !isPaused &&
+                        onSimulationIdle != null &&
+                        !simulationMoving,
+                    onTap: isPaused
+                        ? onResume
+                        : (isRunning ? null : onSimulationStart),
                   ),
                   _LargeKey(
                     label: '停',
                     flex: 11,
-                    onTap: isRunning ? onStop : null,
+                    active: isPaused,
+                    onTap: isRunning && !isPaused ? onStop : null,
                   ),
-                  _LargeKey(label: '夜間加成', flex: 21),
+                  _LargeKey(
+                    label: '夜間加成',
+                    flex: 21,
+                    active: nightSurchargeActive,
+                    onTap: isRunning ? onNightSurcharge : null,
+                  ),
                   _LargeKey(label: '設定', flex: 12, onTap: onSettings),
                 ],
               ),
@@ -792,10 +876,15 @@ class _FuguiBrand extends StatelessWidget {
 }
 
 class _FareStatus extends StatelessWidget {
-  const _FareStatus({required this.status, required this.isRunning});
+  const _FareStatus({
+    required this.status,
+    required this.isRunning,
+    required this.isPaused,
+  });
 
   final String status;
   final bool isRunning;
+  final bool isPaused;
 
   @override
   Widget build(BuildContext context) {
@@ -810,7 +899,7 @@ class _FareStatus extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              isRunning ? '計程中' : '空 車',
+              isPaused ? '暫停中' : (isRunning ? '計程中' : '空 車'),
               style: const TextStyle(
                 color: Color(0xffd4a44f),
                 fontSize: 23,
@@ -1141,7 +1230,7 @@ class _SevenSegmentPainter extends CustomPainter {
       oldDelegate.value != value || oldDelegate.brightness != brightness;
 }
 
-class _LargeKey extends StatelessWidget {
+class _LargeKey extends StatefulWidget {
   const _LargeKey({
     required this.label,
     required this.flex,
@@ -1155,29 +1244,77 @@ class _LargeKey extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  State<_LargeKey> createState() => _LargeKeyState();
+}
+
+class _LargeKeyState extends State<_LargeKey> {
+  bool _isPressed = false;
+
+  void _setPressed(bool value) {
+    if (mounted) setState(() => _isPressed = value);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Expanded(
-      flex: flex,
+      flex: widget.flex,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Material(
-          color: active ? const Color(0xffd6ae58) : const Color(0xffe5e0cf),
-          borderRadius: BorderRadius.circular(14),
-          child: InkWell(
-            onTap: onTap ?? () {},
-            splashColor: const Color(0xffb87816).withValues(alpha: .4),
-            highlightColor: const Color(0xff8f5c12).withValues(alpha: .2),
-            borderRadius: BorderRadius.circular(14),
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: Color(0xff252831),
-                    fontSize: 38,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1,
+        // Extra breathing room makes each key read as a separate hardware key.
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        child: Semantics(
+          button: true,
+          enabled: widget.onTap != null,
+          label: widget.label,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            onTapDown: widget.onTap == null ? null : (_) => _setPressed(true),
+            onTapUp: widget.onTap == null ? null : (_) => _setPressed(false),
+            onTapCancel: widget.onTap == null ? null : () => _setPressed(false),
+            child: AnimatedScale(
+              scale: _isPressed ? .94 : 1,
+              duration: const Duration(milliseconds: 75),
+              curve: Curves.easeOut,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 75),
+                decoration: BoxDecoration(
+                  color: widget.active
+                      ? const Color(0xffd6ae58)
+                      : const Color(0xffe5e0cf),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: _isPressed
+                        ? const Color(0xff6a6251)
+                        : const Color(0xfff8f3df),
+                    width: _isPressed ? 3 : 2,
+                  ),
+                  boxShadow: _isPressed
+                      ? const []
+                      : const [
+                          BoxShadow(
+                            color: Color(0x88000000),
+                            offset: Offset(0, 5),
+                            blurRadius: 2,
+                          ),
+                        ],
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Center(
+                    child: FittedBox(
+                      fit: BoxFit.contain,
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: const Color(0xff252831),
+                          // The 80%-high source glyph is scaled down only when
+                          // a long legend needs to fit its individual key.
+                          fontSize: constraints.maxHeight * .8,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),

@@ -98,4 +98,33 @@ void main() {
     expect(reading.waitingTime, const Duration(minutes: 1));
     expect(reading.fare, 90);
   });
+
+  test(
+    'pause freezes elapsed time and resume excludes the paused interval',
+    () {
+      final controller = TaxiMeterController();
+      final start = DateTime(2026, 9, 20, 10);
+      controller.start(start);
+
+      controller.pause(start.add(const Duration(seconds: 10)));
+      expect(controller.reading!.elapsed, const Duration(seconds: 10));
+
+      controller.resume(start.add(const Duration(seconds: 40)));
+      controller.pause(start.add(const Duration(seconds: 55)));
+      expect(controller.reading!.elapsed, const Duration(seconds: 25));
+    },
+  );
+
+  test('manual night surcharge immediately updates the active trip fare', () {
+    final controller = TaxiMeterController();
+    controller.start(DateTime(2026, 9, 20, 10));
+
+    controller.setNightSurcharge(true);
+    expect(controller.nightSurchargeActive, isTrue);
+    expect(controller.reading!.fare, 105);
+
+    controller.setNightSurcharge(false);
+    expect(controller.nightSurchargeActive, isFalse);
+    expect(controller.reading!.fare, 85);
+  });
 }
