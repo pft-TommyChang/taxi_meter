@@ -294,7 +294,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
             child: _skin.build(
               context: context,
               reading: reading,
@@ -694,9 +694,18 @@ class FuguiMeterSkin extends MeterSkin {
         '${(waitingTime.inMinutes % 100).toString().padLeft(2, '0')}:${(waitingTime.inSeconds % 60).toString().padLeft(2, '0')}';
     final distance = (reading?.distanceMeters ?? 0) / 1000;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
       child: Column(
         children: [
+          _MeterStatusStrip(
+            status: status,
+            isRunning: isRunning,
+            isPaused: isPaused,
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Divider(height: 2, color: Color(0xff6a6d75)),
+          ),
           Expanded(
             flex: 7,
             child: Row(
@@ -751,26 +760,10 @@ class FuguiMeterSkin extends MeterSkin {
                       const SizedBox(height: 18),
                       Expanded(
                         flex: 5,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 19,
-                              child: _FareStatus(
-                                status: status,
-                                isRunning: isRunning,
-                                isPaused: isPaused,
-                              ),
-                            ),
-                            const SizedBox(width: 18),
-                            Expanded(
-                              flex: 81,
-                              child: _FareReadout(
-                                value: reading == null
-                                    ? '----'
-                                    : fare.toString().padLeft(4, '0'),
-                              ),
-                            ),
-                          ],
+                        child: _FareReadout(
+                          value: reading == null
+                              ? '----'
+                              : fare.toString().padLeft(4, '0'),
                         ),
                       ),
                     ],
@@ -780,7 +773,7 @@ class FuguiMeterSkin extends MeterSkin {
             ),
           ),
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
+            padding: EdgeInsets.symmetric(vertical: 8),
             child: Divider(height: 2, color: Color(0xff6a6d75)),
           ),
           Expanded(
@@ -889,8 +882,8 @@ class _FuguiBrand extends StatelessWidget {
   }
 }
 
-class _FareStatus extends StatelessWidget {
-  const _FareStatus({
+class _MeterStatusStrip extends StatelessWidget {
+  const _MeterStatusStrip({
     required this.status,
     required this.isRunning,
     required this.isPaused,
@@ -902,37 +895,39 @@ class _FareStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        border: Border(right: BorderSide(color: Color(0xff575b65))),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xff6a6d75), width: 2),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Padding(
-        padding: const EdgeInsets.only(right: 6),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              isPaused ? '暫停中' : (isRunning ? '計程中' : '空 車'),
-              style: const TextStyle(
-                color: Color(0xffd4a44f),
-                fontSize: 23,
-                fontWeight: FontWeight.w900,
-              ),
+      child: Row(
+        children: [
+          Text(
+            isPaused ? '暫停' : (isRunning ? '計程中' : '空車'),
+            style: const TextStyle(
+              color: Color(0xffd4a44f),
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
             ),
-            const SizedBox(height: 5),
-            Text(
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14),
+            child: SizedBox(
+              height: 24,
+              child: VerticalDivider(width: 2, color: Color(0xff6a6d75)),
+            ),
+          ),
+          Expanded(
+            child: Text(
               status,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xff999da6),
-                fontSize: 16,
-                height: 1.3,
-              ),
+              style: const TextStyle(color: Color(0xff999da6), fontSize: 18),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
