@@ -835,11 +835,11 @@ class FuguiMeterSkin extends MeterSkin {
                       label: '計程計時',
                       flex: 24,
                       labelSize: keyLabelSize,
-                      // A momentary action (start when idle, resume when
-                      // stopped); it is never a lit/selected state itself.
-                      // Starting asks for GPS first, then falls back to a demo
-                      // prompt when GPS is unavailable.
-                      active: false,
+                      // Selected (and locked) while metering, from pressing
+                      // 計程計時 until 停 is pressed. Starting asks for GPS
+                      // first, then falls back to a demo prompt when GPS is
+                      // unavailable; when stopped it resumes.
+                      active: isRunning && !isPaused,
                       onTap: isPaused
                           ? onResume
                           : (isRunning ? null : onStart),

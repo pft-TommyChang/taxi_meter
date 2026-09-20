@@ -197,14 +197,21 @@ class TaxiMeterController {
     _manualNightSurcharge = false;
   }
 
-  /// Allows waiting time to advance between GPS callbacks when the most recent
-  /// high-accuracy reading reports a speed at or below 5 km/h.
+  /// Delayed-time rule: whenever the meter cannot bill distance right now the
+  /// waiting-time clock keeps running. That is the case when the vehicle is
+  /// crawling or stopped (speed at or below the slow threshold), or when GPS has
+  /// gone stale so no new distance is arriving at all (e.g. parked, where a
+  /// distance-filtered GPS stops emitting samples). In short: if distance is not
+  /// increasing, time is.
   void tick(DateTime now) {
     final last = _lastAccountedAt;
     if (!isRunning || last == null || !now.isAfter(last)) return;
-    if (_lastSampleAt != null &&
-        now.difference(_lastSampleAt!) <= const Duration(seconds: 5) &&
-        _speedMetersPerSecond <= rules.slowSpeedMetersPerSecond) {
+    final gpsStale =
+        _lastSampleAt == null ||
+        now.difference(_lastSampleAt!) > const Duration(seconds: 5);
+    final movingFast =
+        !gpsStale && _speedMetersPerSecond > rules.slowSpeedMetersPerSecond;
+    if (!movingFast) {
       _waitingTime += now.difference(last);
     }
     _lastAccountedAt = now;
