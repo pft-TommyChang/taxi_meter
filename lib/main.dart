@@ -741,7 +741,7 @@ class FuguiMeterSkin extends MeterSkin {
             flex: 8,
             child: Row(
               children: [
-                const Expanded(flex: 18, child: _FuguiBrand()),
+                Expanded(flex: 18, child: _FuguiBrand(active: isRunning && !isPaused)),
                 const SizedBox(width: 24),
                 Expanded(
                   flex: 82,
@@ -756,7 +756,7 @@ class FuguiMeterSkin extends MeterSkin {
                               child: _TopMetric(
                                 label: '計時',
                                 value: clock,
-                                unit: '秒',
+                                unit: '秒　',
                                 onTap: onSimulationIdle,
                                 active:
                                     onSimulationIdle != null &&
@@ -764,12 +764,12 @@ class FuguiMeterSkin extends MeterSkin {
                               ),
                             ),
                             Container(
-                              width: 3,
+                              width: 1,
                               height: 150,
                               margin: const EdgeInsets.symmetric(
                                 horizontal: 28,
                               ),
-                              color: const Color(0xff686b72),
+                              color: const Color(0xff6a6d75),
                             ),
                             Expanded(
                               flex: 5,
@@ -877,21 +877,24 @@ class FuguiMeterSkin extends MeterSkin {
 }
 
 class _FuguiBrand extends StatelessWidget {
-  const _FuguiBrand();
+  const _FuguiBrand({required this.active});
+
+  /// True while the meter is actively running; turns 計程中 green.
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
-      decoration: BoxDecoration(
+    return DecoratedBox(
+      decoration: const BoxDecoration(
         border: Border(right: BorderSide(color: Color(0xff575b65))),
       ),
       child: Padding(
-        padding: EdgeInsets.only(right: 7),
+        padding: const EdgeInsets.only(right: 7),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Spacer(),
+            const Text(
               '富貴',
               style: TextStyle(
                 color: Color(0xffd9a94e),
@@ -899,9 +902,9 @@ class _FuguiBrand extends StatelessWidget {
                 fontSize: 40,
               ),
             ),
-            SizedBox(height: 4),
-            Text(
-              'FK-98\nTAIPEI',
+            const SizedBox(height: 4),
+            const Text(
+              'FK-98',
               style: TextStyle(
                 color: Color(0xffa4a8b1),
                 fontSize: 16,
@@ -909,6 +912,8 @@ class _FuguiBrand extends StatelessWidget {
                 height: 1.4,
               ),
             ),
+            const Spacer(),
+            _MeteringIndicator(active: active, fontSize: 16),
           ],
         ),
       ),
@@ -1003,7 +1008,7 @@ class _TopMetric extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 20),
+        const SizedBox(width: 16),
         Expanded(
           flex: 6,
           child: _LedReadout(
@@ -1014,8 +1019,8 @@ class _TopMetric extends StatelessWidget {
             active: active,
           ),
         ),
-        const SizedBox(width: 20),
-        Expanded(flex: 1, child: _OutsideUnit(unit)),
+        const SizedBox(width: 16),
+        Expanded(flex: 3, child: _OutsideUnit(unit)),
       ],
     );
   }
@@ -1100,38 +1105,17 @@ class _OutsideUnit extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Single line for any unit; FittedBox scales it to the slot height, so 公里
+    // (two chars) renders at the same character size as 秒.
     return FittedBox(
       fit: BoxFit.contain,
-      child: SizedBox(
-        width: 100,
-        height: 200,
-        child: Center(
-          child: value.length == 1
-              ? Text(
-                  value,
-                  style: const TextStyle(
-                    color: Color(0xffd2b16d),
-                    fontSize: 100,
-                    fontWeight: FontWeight.w900,
-                  ),
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: value
-                      .split('')
-                      .map(
-                        (character) => Text(
-                          character,
-                          style: const TextStyle(
-                            color: Color(0xffd2b16d),
-                            fontSize: 90,
-                            fontWeight: FontWeight.w900,
-                            height: .85,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
+      child: Text(
+        value,
+        maxLines: 1,
+        style: const TextStyle(
+          color: Color(0xffd2b16d),
+          fontSize: 100,
+          fontWeight: FontWeight.w900,
         ),
       ),
     );
@@ -1145,22 +1129,47 @@ class _FareReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Right-align the whole row and reserve exactly four LED slots for the
-    // price, so it no longer stretches into a wide, mostly-empty panel.
+    // 北市費率 sits in the empty space on the left; a Spacer keeps 車資 /
+    // price / 元 aligned to the right. Four LED slots are reserved for the price
+    // so it never stretches into a wide, mostly-empty panel.
     return LayoutBuilder(
       builder: (context, constraints) {
         final h = constraints.maxHeight;
         return Row(
-          mainAxisAlignment: MainAxisAlignment.end,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '營業區:',
+                  style: TextStyle(
+                    color: Color(0xffa4a8b1), // grey
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                    fontSize: 16,
+                  ),
+                ),
+                Text(
+                  '北市費率',
+                  style: TextStyle(
+                    color: Color(0xffffe23d), // bright yellow
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
             Text(
               '車資',
               style: TextStyle(
                 color: const Color(0xffb6a279),
                 fontWeight: FontWeight.w900,
                 letterSpacing: 1,
-                fontSize: h * 0.42,
+                fontSize: h * 0.36,
               ),
             ),
             SizedBox(width: h * 0.14),
@@ -1181,6 +1190,36 @@ class _FareReadout extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// A bordered "計程中" legend: light grey when idle, solid green while metering.
+class _MeteringIndicator extends StatelessWidget {
+  const _MeteringIndicator({required this.active, required this.fontSize});
+
+  final bool active;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? const Color(0xff45e784) : const Color(0xff8b8f98);
+    final f = fontSize;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: f * 0.55, vertical: f * 0.3),
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: f * 0.1),
+        borderRadius: BorderRadius.circular(f * 0.4),
+      ),
+      child: Text(
+        '計程中',
+        style: TextStyle(
+          color: color,
+          fontSize: f,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1,
+        ),
+      ),
     );
   }
 }
