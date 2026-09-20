@@ -9,6 +9,7 @@ import 'taxi_meter_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
@@ -269,7 +270,6 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
   }
 
   void _toggleNightSurcharge() {
-    if (!_meter.isRunning) return;
     _meter.setNightSurcharge(!_meter.nightSurchargeActive);
     setState(() {});
   }
@@ -295,6 +295,69 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
         ],
       ),
     );
+  }
+
+  void _printReceipt() {
+    final reading = _meter.reading;
+    if (reading == null) return;
+    final receipt = _buildReceiptText(reading);
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('本趟明細'),
+        content: SingleChildScrollView(
+          child: Text(
+            receipt,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 14,
+              height: 1.6,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('關閉'),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: receipt));
+              if (!context.mounted) return;
+              Navigator.pop(dialogContext);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已複製本趟明細到剪貼簿')),
+              );
+            },
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('複製'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _buildReceiptText(TripReading reading) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final s = reading.startedAt;
+    final started =
+        '${s.year}-${two(s.month)}-${two(s.day)} ${two(s.hour)}:${two(s.minute)}';
+    final wait = reading.waitingTime;
+    final waitStr =
+        '${two(wait.inMinutes % 60)}:${two(wait.inSeconds % 60)}';
+    final km = (reading.distanceMeters / 1000).toStringAsFixed(2);
+    final night = _meter.nightSurchargeActive ? '是' : '否';
+    return [
+      '台北跳表  富貴 FK-98',
+      '營業區：北北基',
+      '--------------------',
+      '上車時間：$started',
+      '行駛里程：$km 公里',
+      '延滯計時：$waitStr',
+      '夜間加成：$night',
+      '--------------------',
+      '應收金額：NT\$${reading.fare}',
+    ].join('\n');
   }
 
   @override
@@ -330,6 +393,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
               onReset: _resetTrip,
               onNightSurcharge: _toggleNightSurcharge,
               onSettings: _openSettings,
+              onPrint: _printReceipt,
               onSimulationMove:
                   _tripSource == _TripSource.simulation && !_isPaused
                   ? _simulateMove
@@ -365,6 +429,7 @@ abstract class MeterSkin {
     required VoidCallback onReset,
     required VoidCallback onNightSurcharge,
     required VoidCallback onSettings,
+    required VoidCallback onPrint,
     required VoidCallback? onSimulationMove,
     required VoidCallback? onSimulationIdle,
     required bool simulationMoving,
@@ -393,6 +458,7 @@ class _LegacyFuguiMeterSkin extends MeterSkin {
     required VoidCallback onReset,
     required VoidCallback onNightSurcharge,
     required VoidCallback onSettings,
+    required VoidCallback onPrint,
     required VoidCallback? onSimulationMove,
     required VoidCallback? onSimulationIdle,
     required bool simulationMoving,
@@ -703,10 +769,35 @@ class FuguiMeterSkin extends MeterSkin {
     required VoidCallback onReset,
     required VoidCallback onNightSurcharge,
     required VoidCallback onSettings,
+    required VoidCallback onPrint,
     required VoidCallback? onSimulationMove,
     required VoidCallback? onSimulationIdle,
     required bool simulationMoving,
   }) {
+    // Portrait uses a dedicated top-to-bottom layout; landscape keeps the
+    // original wide FK-98 layout below completely unchanged.
+    if (MediaQuery.orientationOf(context) == Orientation.portrait) {
+      return _buildPortrait(
+        context: context,
+        reading: reading,
+        fare: fare,
+        status: status,
+        isRunning: isRunning,
+        isPaused: isPaused,
+        nightSurchargeActive: nightSurchargeActive,
+        onStart: onStart,
+        onSimulationStart: onSimulationStart,
+        onStop: onStop,
+        onResume: onResume,
+        onReset: onReset,
+        onNightSurcharge: onNightSurcharge,
+        onSettings: onSettings,
+        onPrint: onPrint,
+        onSimulationMove: onSimulationMove,
+        onSimulationIdle: onSimulationIdle,
+        simulationMoving: simulationMoving,
+      );
+    }
     // Physical taxi meters count 計時 only while the vehicle is below the
     // delayed-time threshold; elapsed trip time itself is not shown here.
     final waitingTime = reading?.waitingTime ?? Duration.zero;
@@ -732,6 +823,7 @@ class FuguiMeterSkin extends MeterSkin {
             status: status,
             isRunning: isRunning,
             isPaused: isPaused,
+            onSettings: onSettings,
           ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
@@ -774,7 +866,7 @@ class FuguiMeterSkin extends MeterSkin {
                             Expanded(
                               flex: 5,
                               child: _TopMetric(
-                                label: '行駛',
+                                label: '計程',
                                 // Blank unused leading zeros; toStringAsFixed
                                 // keeps the ones digit before the dot.
                                 value: distance
@@ -811,59 +903,220 @@ class FuguiMeterSkin extends MeterSkin {
           ),
           Expanded(
             flex: 3,
+            child: Padding(
+              // Inset the key row so the buttons read smaller with more
+              // breathing room around them.
+              padding: const EdgeInsets.fromLTRB(48, 8, 48, 10),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Size the legend by BOTH axes so tall CJK glyphs are never
+                  // clipped vertically when the key is short.
+                  final byWidth = constraints.maxWidth * .042;
+                  final byHeight = constraints.maxHeight * .42;
+                  final keyLabelSize =
+                      byWidth < byHeight ? byWidth : byHeight;
+                  return Row(
+                    children: [
+                      _LargeKey(
+                        label: '空',
+                        flex: 10,
+                        labelSize: keyLabelSize,
+                        active: !isPaused,
+                        onTap: isPaused ? onReset : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _LargeKey(
+                        label: '計程計時',
+                        flex: 24,
+                        labelSize: keyLabelSize,
+                        active: isRunning && !isPaused,
+                        onTap: isPaused
+                            ? onResume
+                            : (isRunning ? null : onStart),
+                      ),
+                      const SizedBox(width: 8),
+                      _LargeKey(
+                        label: '停',
+                        flex: 10,
+                        labelSize: keyLabelSize,
+                        active: isPaused,
+                        onTap: isRunning && !isPaused ? onStop : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _LargeKey(
+                        label: '夜間加成',
+                        flex: 24,
+                        labelSize: keyLabelSize,
+                        active: nightSurchargeActive,
+                        onTap: onNightSurcharge,
+                      ),
+                      const SizedBox(width: 8),
+                      _LargeKey(
+                        label: '列印',
+                        flex: 15,
+                        labelSize: keyLabelSize,
+                        onTap: isPaused ? onPrint : null,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Portrait layout: one readout per row, top to bottom. Reuses the same LED
+  /// readout and key widgets as landscape; each _LedReadout is width-flexible
+  /// (FittedBox), so nothing overflows in the tall/narrow aspect ratio.
+  Widget _buildPortrait({
+    required BuildContext context,
+    required TripReading? reading,
+    required int fare,
+    required String status,
+    required bool isRunning,
+    required bool isPaused,
+    required bool nightSurchargeActive,
+    required VoidCallback onStart,
+    required VoidCallback onSimulationStart,
+    required VoidCallback onStop,
+    required VoidCallback onResume,
+    required VoidCallback onReset,
+    required VoidCallback onNightSurcharge,
+    required VoidCallback onSettings,
+    required VoidCallback onPrint,
+    required VoidCallback? onSimulationMove,
+    required VoidCallback? onSimulationIdle,
+    required bool simulationMoving,
+  }) {
+    final waitingTime = reading?.waitingTime ?? Duration.zero;
+    final rawClock =
+        (waitingTime.inMinutes % 100).toString().padLeft(2, '0') +
+        (waitingTime.inSeconds % 60).toString().padLeft(2, '0');
+    final clockDigits = rawClock.split('');
+    for (var i = 0; i < clockDigits.length - 1; i++) {
+      if (clockDigits[i] != '0') break;
+      clockDigits[i] = ' ';
+    }
+    final clock =
+        '${clockDigits[0]}${clockDigits[1]}:${clockDigits[2]}${clockDigits[3]}';
+    final distance = (reading?.distanceMeters ?? 0) / 1000;
+
+    const divider = Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
+      child: Divider(height: 2, color: Color(0xff6a6d75)),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _MeterStatusStrip(
+            status: status,
+            isRunning: isRunning,
+            isPaused: isPaused,
+            onSettings: onSettings,
+          ),
+          divider,
+          _PortraitBrand(active: isRunning && !isPaused),
+          divider,
+          Expanded(
+            flex: 5,
+            child: _LedReadout(
+              label: '計時',
+              unit: '秒',
+              value: clock,
+              onTap: onSimulationIdle,
+              active: onSimulationIdle != null && !simulationMoving,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            flex: 5,
+            child: _LedReadout(
+              label: '計程',
+              unit: '公里',
+              value: distance.toStringAsFixed(1).padLeft(5, ' '),
+              onTap: onSimulationMove,
+              active: onSimulationMove != null && simulationMoving,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            flex: 7,
+            child: _LedReadout(
+              label: '車資',
+              unit: '元',
+              value: fare.toString().padLeft(4, ' '),
+              main: true,
+            ),
+          ),
+          divider,
+          Expanded(
+            flex: 8,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final keyLabelSize = constraints.maxWidth * .040;
-                return Row(
+                final keyLabelSize = constraints.maxWidth * .06;
+                const gap = SizedBox(width: 8);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _LargeKey(
-                      // This is a physical key cap, so its legend never changes
-                      // with the meter state. The display above communicates state.
-                      label: '空',
-                      flex: 10,
-                      labelSize: keyLabelSize,
-                      // 空 is the on-duty state: selected (and therefore locked)
-                      // while idle or metering; only pressable once stopped, to
-                      // clear back to empty.
-                      active: !isPaused,
-                      onTap: isPaused ? onReset : null,
+                    // Row 1: trip-flow keys.
+                    Expanded(
+                      child: Row(
+                        children: [
+                          _LargeKey(
+                            label: '空',
+                            flex: 10,
+                            labelSize: keyLabelSize,
+                            active: !isPaused,
+                            onTap: isPaused ? onReset : null,
+                          ),
+                          gap,
+                          _LargeKey(
+                            label: '計程計時',
+                            flex: 24,
+                            labelSize: keyLabelSize,
+                            active: isRunning && !isPaused,
+                            onTap: isPaused
+                                ? onResume
+                                : (isRunning ? null : onStart),
+                          ),
+                          gap,
+                          _LargeKey(
+                            label: '停',
+                            flex: 10,
+                            labelSize: keyLabelSize,
+                            active: isPaused,
+                            onTap: isRunning && !isPaused ? onStop : null,
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    _LargeKey(
-                      label: '計程計時',
-                      flex: 24,
-                      labelSize: keyLabelSize,
-                      // Selected (and locked) while metering, from pressing
-                      // 計程計時 until 停 is pressed. Starting asks for GPS
-                      // first, then falls back to a demo prompt when GPS is
-                      // unavailable; when stopped it resumes.
-                      active: isRunning && !isPaused,
-                      onTap: isPaused
-                          ? onResume
-                          : (isRunning ? null : onStart),
-                    ),
-                    const SizedBox(width: 8),
-                    _LargeKey(
-                      label: '停',
-                      flex: 10,
-                      labelSize: keyLabelSize,
-                      active: isPaused,
-                      onTap: isRunning && !isPaused ? onStop : null,
-                    ),
-                    const SizedBox(width: 8),
-                    _LargeKey(
-                      label: '夜間加成',
-                      flex: 24,
-                      labelSize: keyLabelSize,
-                      active: nightSurchargeActive,
-                      onTap: isRunning ? onNightSurcharge : null,
-                    ),
-                    const SizedBox(width: 8),
-                    _LargeKey(
-                      label: '設定',
-                      flex: 15,
-                      labelSize: keyLabelSize,
-                      onTap: onSettings,
+                    const SizedBox(height: 8),
+                    // Row 2: options.
+                    Expanded(
+                      child: Row(
+                        children: [
+                          _LargeKey(
+                            label: '夜間加成',
+                            flex: 24,
+                            labelSize: keyLabelSize,
+                            active: nightSurchargeActive,
+                            onTap: onNightSurcharge,
+                          ),
+                          gap,
+                          _LargeKey(
+                            label: '列印',
+                            flex: 15,
+                            labelSize: keyLabelSize,
+                            onTap: isPaused ? onPrint : null,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 );
@@ -872,6 +1125,65 @@ class FuguiMeterSkin extends MeterSkin {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Compact brand header used only by the portrait layout.
+class _PortraitBrand extends StatelessWidget {
+  const _PortraitBrand({required this.active});
+
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const Text(
+          '富貴',
+          style: TextStyle(
+            color: Color(0xffd9a94e),
+            fontWeight: FontWeight.w900,
+            fontSize: 30,
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Text(
+          'FK-98',
+          style: TextStyle(
+            color: Color(0xffa4a8b1),
+            fontSize: 14,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(width: 18),
+        const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '營業區:',
+              style: TextStyle(
+                color: Color(0xffa4a8b1),
+                fontWeight: FontWeight.w900,
+                fontSize: 11,
+              ),
+            ),
+            Text(
+              '北北基',
+              style: TextStyle(
+                color: Color(0xffffe23d),
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+        const Spacer(),
+        _MeteringIndicator(active: active, fontSize: 15),
+      ],
     );
   }
 }
@@ -893,7 +1205,6 @@ class _FuguiBrand extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Spacer(),
             const Text(
               '富貴',
               style: TextStyle(
@@ -926,11 +1237,13 @@ class _MeterStatusStrip extends StatelessWidget {
     required this.status,
     required this.isRunning,
     required this.isPaused,
+    required this.onSettings,
   });
 
   final String status;
   final bool isRunning;
   final bool isPaused;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -964,6 +1277,16 @@ class _MeterStatusStrip extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Color(0xff999da6), fontSize: 12),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onSettings,
+            child: const Icon(
+              Icons.settings,
+              color: Color(0xffb6a279),
+              size: 20,
             ),
           ),
         ],
@@ -1152,7 +1475,7 @@ class _FareReadout extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '北市費率',
+                  '北北基',
                   style: TextStyle(
                     color: Color(0xffffe23d), // bright yellow
                     fontWeight: FontWeight.w900,
@@ -1430,6 +1753,17 @@ class _LargeKeyState extends State<_LargeKey> {
 
   @override
   Widget build(BuildContext context) {
+    // A key with no onTap is not pressable; render it as a dim, recessed,
+    // shadowless grey cap so it reads as disabled. `active` (gold) is reserved
+    // for a genuine toggle that IS still pressable, e.g. 夜間加成 while running.
+    final disabled = widget.onTap == null;
+    final Color bgColor = disabled
+        ? const Color(0xff33373f)
+        : (widget.active
+            ? const Color(0xffd6ae58)
+            : const Color(0xffe5e0cf));
+    final Color textColor =
+        disabled ? const Color(0xff70747d) : const Color(0xff252831);
     return Expanded(
       flex: widget.flex,
       child: Padding(
@@ -1452,17 +1786,17 @@ class _LargeKeyState extends State<_LargeKey> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 75),
                 decoration: BoxDecoration(
-                  color: widget.active
-                      ? const Color(0xffd6ae58)
-                      : const Color(0xffe5e0cf),
+                  color: bgColor,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: _isPressed
                         ? const Color(0xff6a6251)
-                        : const Color(0xfff8f3df),
+                        : (disabled
+                            ? const Color(0xff4a4e56)
+                            : const Color(0xfff8f3df)),
                     width: _isPressed ? 3 : 2,
                   ),
-                  boxShadow: _isPressed
+                  boxShadow: (_isPressed || disabled)
                       ? const []
                       : const [
                           BoxShadow(
@@ -1481,7 +1815,7 @@ class _LargeKeyState extends State<_LargeKey> {
                       maxLines: 1,
                       overflow: TextOverflow.clip,
                       style: TextStyle(
-                        color: const Color(0xff252831),
+                        color: textColor,
                         fontSize: widget.labelSize,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1,

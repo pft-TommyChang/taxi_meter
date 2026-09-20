@@ -125,7 +125,6 @@ class TaxiMeterController {
     _accuracyMeters = null;
     _pausedAt = null;
     _pausedDuration = Duration.zero;
-    _manualNightSurcharge = false;
   }
 
   void pause(DateTime now) {
@@ -154,7 +153,6 @@ class TaxiMeterController {
   /// A trip that starts during the regulated night period stays surcharged even
   /// when this manual setting is turned off.
   void setNightSurcharge(bool enabled) {
-    if (!isRunning) return;
     _manualNightSurcharge = enabled;
   }
 
