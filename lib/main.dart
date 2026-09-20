@@ -282,38 +282,43 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
     final reading = _meter.reading;
     return Scaffold(
       backgroundColor: const Color(0xff08090b),
-      body: SafeArea(
-        child: SizedBox.expand(
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: 2500,
-              height: 1000,
-              child: _skin.build(
-                context: context,
-                reading: reading,
-                fare: reading?.fare ?? 0,
-                status: _locationStatus,
-                isRunning: _meter.isRunning,
-                isPaused: _isPaused,
-                nightSurchargeActive: _meter.nightSurchargeActive,
-                onStart: _startTrip,
-                onSimulationStart: _startSimulation,
-                onStop: _pauseTrip,
-                onResume: _resumeTrip,
-                onReset: _resetTrip,
-                onNightSurcharge: _toggleNightSurcharge,
-                onSettings: _openSettings,
-                onSimulationMove:
-                    _tripSource == _TripSource.simulation && !_isPaused
-                    ? _simulateMove
-                    : null,
-                onSimulationIdle:
-                    _tripSource == _TripSource.simulation && !_isPaused
-                    ? _simulateIdle
-                    : null,
-                simulationMoving: _simulationMoving,
-              ),
+      // The cabinet finish intentionally covers the full display, including
+      // the unsafe system edges. Controls remain inside SafeArea below.
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xff32343b), Color(0xff08090d), Color(0xff17191f)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 20),
+            child: _skin.build(
+              context: context,
+              reading: reading,
+              fare: reading?.fare ?? 0,
+              status: _locationStatus,
+              isRunning: _meter.isRunning,
+              isPaused: _isPaused,
+              nightSurchargeActive: _meter.nightSurchargeActive,
+              onStart: _startTrip,
+              onSimulationStart: _startSimulation,
+              onStop: _pauseTrip,
+              onResume: _resumeTrip,
+              onReset: _resetTrip,
+              onNightSurcharge: _toggleNightSurcharge,
+              onSettings: _openSettings,
+              onSimulationMove:
+                  _tripSource == _TripSource.simulation && !_isPaused
+                  ? _simulateMove
+                  : null,
+              onSimulationIdle:
+                  _tripSource == _TripSource.simulation && !_isPaused
+                  ? _simulateIdle
+                  : null,
+              simulationMoving: _simulationMoving,
             ),
           ),
         ),
@@ -682,154 +687,163 @@ class FuguiMeterSkin extends MeterSkin {
     required VoidCallback? onSimulationIdle,
     required bool simulationMoving,
   }) {
-    final elapsed = reading?.elapsed ?? Duration.zero;
+    // Physical taxi meters count 計時 only while the vehicle is below the
+    // delayed-time threshold; elapsed trip time itself is not shown here.
+    final waitingTime = reading?.waitingTime ?? Duration.zero;
     final clock =
-        '${(elapsed.inMinutes % 100).toString().padLeft(2, '0')}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')}';
+        '${(waitingTime.inMinutes % 100).toString().padLeft(2, '0')}:${(waitingTime.inSeconds % 60).toString().padLeft(2, '0')}';
     final distance = (reading?.distanceMeters ?? 0) / 1000;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xff32343b), Color(0xff08090d), Color(0xff17191f)],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-        border: Border.all(color: const Color(0xff71747d), width: 2),
-        boxShadow: const [BoxShadow(color: Colors.black87, blurRadius: 16)],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(25, 10, 25, 9),
-        child: Column(
-          children: [
-            Expanded(
-              flex: 7,
-              child: Row(
-                children: [
-                  const Expanded(flex: 18, child: _FuguiBrand()),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    flex: 82,
-                    child: Column(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 5,
-                                child: _TopMetric(
-                                  label: '計程時間',
-                                  value: clock,
-                                  unit: '秒',
-                                  onTap: onSimulationIdle,
-                                  active:
-                                      onSimulationIdle != null &&
-                                      !simulationMoving,
-                                ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: Column(
+        children: [
+          Expanded(
+            flex: 7,
+            child: Row(
+              children: [
+                const Expanded(flex: 18, child: _FuguiBrand()),
+                const SizedBox(width: 24),
+                Expanded(
+                  flex: 82,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 5,
+                              child: _TopMetric(
+                                label: '計時',
+                                value: clock,
+                                unit: '秒',
+                                onTap: onSimulationIdle,
+                                active:
+                                    onSimulationIdle != null &&
+                                    !simulationMoving,
                               ),
-                              Container(
-                                width: 3,
-                                height: 150,
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 28,
-                                ),
-                                color: const Color(0xff686b72),
+                            ),
+                            Container(
+                              width: 3,
+                              height: 150,
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 28,
                               ),
-                              Expanded(
-                                flex: 5,
-                                child: _TopMetric(
-                                  label: '行駛公里',
-                                  value: distance
-                                      .toStringAsFixed(1)
-                                      .padLeft(5, '0'),
-                                  unit: '公里',
-                                  onTap: onSimulationMove,
-                                  active:
-                                      onSimulationMove != null &&
-                                      simulationMoving,
-                                ),
+                              color: const Color(0xff686b72),
+                            ),
+                            Expanded(
+                              flex: 5,
+                              child: _TopMetric(
+                                label: '行駛',
+                                value: distance
+                                    .toStringAsFixed(1)
+                                    .padLeft(5, '0'),
+                                unit: '公里',
+                                onTap: onSimulationMove,
+                                active:
+                                    onSimulationMove != null &&
+                                    simulationMoving,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                        Expanded(
-                          flex: 5,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 19,
-                                child: _FareStatus(
-                                  status: status,
-                                  isRunning: isRunning,
-                                  isPaused: isPaused,
-                                ),
+                      ),
+                      const SizedBox(height: 18),
+                      Expanded(
+                        flex: 5,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 19,
+                              child: _FareStatus(
+                                status: status,
+                                isRunning: isRunning,
+                                isPaused: isPaused,
                               ),
-                              const SizedBox(width: 9),
-                              Expanded(
-                                flex: 81,
-                                child: _FareReadout(
-                                  value: reading == null
-                                      ? '----'
-                                      : fare.toString().padLeft(4, '0'),
-                                ),
+                            ),
+                            const SizedBox(width: 18),
+                            Expanded(
+                              flex: 81,
+                              child: _FareReadout(
+                                value: reading == null
+                                    ? '----'
+                                    : fare.toString().padLeft(4, '0'),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Divider(height: 2, color: Color(0xff6a6d75)),
+          ),
+          Expanded(
+            flex: 3,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final keyLabelSize = constraints.maxWidth * .045;
+                return Row(
+                  children: [
+                    _LargeKey(
+                      // This is a physical key cap, so its legend never changes
+                      // with the meter state. The display above communicates state.
+                      label: '空',
+                      flex: 12,
+                      labelSize: keyLabelSize,
+                      // A stopped trip has both 空 and 停 selected: it is parked
+                      // and ready for the driver to clear back to empty.
+                      active: isPaused,
+                      onTap: isPaused ? onReset : (isRunning ? null : onStart),
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 12),
+                    _LargeKey(
+                      label: '計程計時',
+                      flex: 19,
+                      labelSize: keyLabelSize,
+                      active:
+                          isRunning &&
+                          !isPaused &&
+                          onSimulationIdle != null &&
+                          !simulationMoving,
+                      onTap: isPaused
+                          ? onResume
+                          : (isRunning ? null : onSimulationStart),
+                    ),
+                    const SizedBox(width: 12),
+                    _LargeKey(
+                      label: '停',
+                      flex: 11,
+                      labelSize: keyLabelSize,
+                      active: isPaused,
+                      onTap: isRunning && !isPaused ? onStop : null,
+                    ),
+                    const SizedBox(width: 12),
+                    _LargeKey(
+                      label: '夜間加成',
+                      flex: 21,
+                      labelSize: keyLabelSize,
+                      active: nightSurchargeActive,
+                      onTap: isRunning ? onNightSurcharge : null,
+                    ),
+                    const SizedBox(width: 12),
+                    _LargeKey(
+                      label: '設定',
+                      flex: 12,
+                      labelSize: keyLabelSize,
+                      onTap: onSettings,
+                    ),
+                  ],
+                );
+              },
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 7),
-              child: Divider(height: 2, color: Color(0xff6a6d75)),
-            ),
-            Expanded(
-              flex: 3,
-              child: Row(
-                children: [
-                  _LargeKey(
-                    // This is a physical key cap, so its legend never changes
-                    // with the meter state. The display above communicates state.
-                    label: '空',
-                    flex: 12,
-                    // A stopped trip has both 空 and 停 selected: it is parked
-                    // and ready for the driver to clear back to empty.
-                    active: isPaused,
-                    onTap: isPaused ? onReset : (isRunning ? null : onStart),
-                  ),
-                  _LargeKey(
-                    label: '計程計時',
-                    flex: 19,
-                    active:
-                        isRunning &&
-                        !isPaused &&
-                        onSimulationIdle != null &&
-                        !simulationMoving,
-                    onTap: isPaused
-                        ? onResume
-                        : (isRunning ? null : onSimulationStart),
-                  ),
-                  _LargeKey(
-                    label: '停',
-                    flex: 11,
-                    active: isPaused,
-                    onTap: isRunning && !isPaused ? onStop : null,
-                  ),
-                  _LargeKey(
-                    label: '夜間加成',
-                    flex: 21,
-                    active: nightSurchargeActive,
-                    onTap: isRunning ? onNightSurcharge : null,
-                  ),
-                  _LargeKey(label: '設定', flex: 12, onTap: onSettings),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -943,8 +957,8 @@ class _TopMetric extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(
-          width: 300,
+        Expanded(
+          flex: 3,
           child: FittedBox(
             fit: BoxFit.contain,
             child: Text(
@@ -960,8 +974,9 @@ class _TopMetric extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 20),
         Expanded(
+          flex: 6,
           child: _LedReadout(
             label: '',
             unit: '',
@@ -970,8 +985,8 @@ class _TopMetric extends StatelessWidget {
             active: active,
           ),
         ),
-        const SizedBox(width: 16),
-        SizedBox(width: 92, child: _OutsideUnit(unit)),
+        const SizedBox(width: 20),
+        Expanded(flex: 1, child: _OutsideUnit(unit)),
       ],
     );
   }
@@ -1104,10 +1119,27 @@ class _FareReadout extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _LedReadout(label: '應收金額', unit: '', value: value, main: true),
+          flex: 3,
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: const Text(
+              '車資',
+              style: TextStyle(
+                color: Color(0xffb6a279),
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+                fontSize: 100,
+              ),
+            ),
+          ),
         ),
-        const SizedBox(width: 16),
-        const SizedBox(width: 100, child: _OutsideUnit('元')),
+        const SizedBox(width: 20),
+        Expanded(
+          flex: 6,
+          child: _LedReadout(label: '', unit: '', value: value, main: true),
+        ),
+        const SizedBox(width: 20),
+        const Expanded(flex: 1, child: _OutsideUnit('元')),
       ],
     );
   }
@@ -1234,12 +1266,14 @@ class _LargeKey extends StatefulWidget {
   const _LargeKey({
     required this.label,
     required this.flex,
+    required this.labelSize,
     this.active = false,
     this.onTap,
   });
 
   final String label;
   final int flex;
+  final double labelSize;
   final bool active;
   final VoidCallback? onTap;
 
@@ -1259,8 +1293,8 @@ class _LargeKeyState extends State<_LargeKey> {
     return Expanded(
       flex: widget.flex,
       child: Padding(
-        // Extra breathing room makes each key read as a separate hardware key.
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        // Separators are placed by the parent row, so its edge keys are flush.
+        padding: EdgeInsets.zero,
         child: Semantics(
           button: true,
           enabled: widget.onTap != null,
@@ -1300,19 +1334,17 @@ class _LargeKeyState extends State<_LargeKey> {
                 ),
                 child: LayoutBuilder(
                   builder: (context, constraints) => Center(
-                    child: FittedBox(
-                      fit: BoxFit.contain,
-                      child: Text(
-                        widget.label,
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: const Color(0xff252831),
-                          // The 80%-high source glyph is scaled down only when
-                          // a long legend needs to fit its individual key.
-                          fontSize: constraints.maxHeight * .8,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1,
-                        ),
+                    // A shared, deliberately modest size keeps engraved key
+                    // legends visually uniform instead of scaling per key.
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.clip,
+                      style: TextStyle(
+                        color: const Color(0xff252831),
+                        fontSize: widget.labelSize,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
                       ),
                     ),
                   ),
