@@ -294,7 +294,7 @@ class _TaxiMeterPageState extends State<TaxiMeterPage> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
             child: _skin.build(
               context: context,
               reading: reading,
@@ -690,11 +690,22 @@ class FuguiMeterSkin extends MeterSkin {
     // Physical taxi meters count 計時 only while the vehicle is below the
     // delayed-time threshold; elapsed trip time itself is not shown here.
     final waitingTime = reading?.waitingTime ?? Duration.zero;
+    // Fixed "XX:XX" layout: always four digit slots plus the colon. Leading
+    // zeros become blanks (each blank still occupies one LED slot), stopping at
+    // the first non-zero digit; the final seconds digit is always kept.
+    final rawClock =
+        (waitingTime.inMinutes % 100).toString().padLeft(2, '0') +
+        (waitingTime.inSeconds % 60).toString().padLeft(2, '0');
+    final clockDigits = rawClock.split('');
+    for (var i = 0; i < clockDigits.length - 1; i++) {
+      if (clockDigits[i] != '0') break;
+      clockDigits[i] = ' ';
+    }
     final clock =
-        '${(waitingTime.inMinutes % 100).toString().padLeft(2, '0')}:${(waitingTime.inSeconds % 60).toString().padLeft(2, '0')}';
+        '${clockDigits[0]}${clockDigits[1]}:${clockDigits[2]}${clockDigits[3]}';
     final distance = (reading?.distanceMeters ?? 0) / 1000;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
       child: Column(
         children: [
           _MeterStatusStrip(
@@ -744,9 +755,11 @@ class FuguiMeterSkin extends MeterSkin {
                               flex: 5,
                               child: _TopMetric(
                                 label: '行駛',
+                                // Blank unused leading zeros; toStringAsFixed
+                                // keeps the ones digit before the dot.
                                 value: distance
                                     .toStringAsFixed(1)
-                                    .padLeft(5, '0'),
+                                    .padLeft(5, ' '),
                                 unit: '公里',
                                 onTap: onSimulationMove,
                                 active:
@@ -761,9 +774,11 @@ class FuguiMeterSkin extends MeterSkin {
                       Expanded(
                         flex: 5,
                         child: _FareReadout(
+                          // Blank before the trip starts; blank unused leading
+                          // zeros once running (the ones digit is always kept).
                           value: reading == null
-                              ? '----'
-                              : fare.toString().padLeft(4, '0'),
+                              ? '    '
+                              : fare.toString().padLeft(4, ' '),
                         ),
                       ),
                     ],
@@ -789,21 +804,20 @@ class FuguiMeterSkin extends MeterSkin {
                       label: '空',
                       flex: 12,
                       labelSize: keyLabelSize,
-                      // A stopped trip has both 空 and 停 selected: it is parked
-                      // and ready for the driver to clear back to empty.
-                      active: isPaused,
-                      onTap: isPaused ? onReset : (isRunning ? null : onStart),
+                      // 空 is the on-duty state: selected (and therefore locked)
+                      // while idle or metering; only pressable once stopped, to
+                      // clear back to empty.
+                      active: !isPaused,
+                      onTap: isPaused ? onReset : null,
                     ),
                     const SizedBox(width: 12),
                     _LargeKey(
                       label: '計程計時',
                       flex: 19,
                       labelSize: keyLabelSize,
-                      active:
-                          isRunning &&
-                          !isPaused &&
-                          onSimulationIdle != null &&
-                          !simulationMoving,
+                      // A momentary action (start when idle, resume when
+                      // stopped); it is never a lit/selected state itself.
+                      active: false,
                       onTap: isPaused
                           ? onResume
                           : (isRunning ? null : onSimulationStart),
@@ -867,7 +881,7 @@ class _FuguiBrand extends StatelessWidget {
             ),
             SizedBox(height: 4),
             Text(
-              'FK-98\nTAXIMETER\nTAIPEI',
+              'FK-98\nTAIPEI',
               style: TextStyle(
                 color: Color(0xffa4a8b1),
                 fontSize: 16,
@@ -897,7 +911,7 @@ class _MeterStatusStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         border: Border.all(color: const Color(0xff6a6d75), width: 2),
         borderRadius: BorderRadius.circular(8),
@@ -908,14 +922,14 @@ class _MeterStatusStrip extends StatelessWidget {
             isPaused ? '暫停' : (isRunning ? '計程中' : '空車'),
             style: const TextStyle(
               color: Color(0xffd4a44f),
-              fontSize: 24,
+              fontSize: 14,
               fontWeight: FontWeight.w900,
             ),
           ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 14),
             child: SizedBox(
-              height: 24,
+              height: 14,
               child: VerticalDivider(width: 2, color: Color(0xff6a6d75)),
             ),
           ),
@@ -924,7 +938,7 @@ class _MeterStatusStrip extends StatelessWidget {
               status,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Color(0xff999da6), fontSize: 18),
+              style: const TextStyle(color: Color(0xff999da6), fontSize: 12),
             ),
           ),
         ],
